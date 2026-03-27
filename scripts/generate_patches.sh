@@ -12,10 +12,12 @@
 #   - gh CLI authenticated (for uploading)
 #
 # Artifact naming convention (must match platformSuffix() in updater.go):
-#   Linux:        port-bridge_linux-amd64
-#   Windows:      port-bridge_windows-amd64.exe
-#   macOS amd64:  port-bridge_darwin-amd64
-#   macOS arm64:  port-bridge_darwin-arm64
+#   Linux amd64:   port-bridge_linux-amd64
+#   Linux arm64:   port-bridge_linux-arm64
+#   Windows amd64: port-bridge_windows-amd64.exe
+#   Windows arm64: port-bridge_windows-arm64.exe
+#   macOS amd64:   port-bridge_darwin-amd64
+#   macOS arm64:   port-bridge_darwin-arm64
 
 set -euo pipefail
 
@@ -45,7 +47,9 @@ trap 'rm -rf "$TMPDIR"' EXIT
 # Naming matches platformSuffix() = runtime.GOOS + "-" + runtime.GOARCH
 PLATFORMS=(
     "windows-amd64:exe"
+    "windows-arm64:exe"
     "linux-amd64:"
+    "linux-arm64:"
     "darwin-amd64:"
     "darwin-arm64:"
 )
