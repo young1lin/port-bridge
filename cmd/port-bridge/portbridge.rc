@@ -1,0 +1,8 @@
+// Windows resource script for PortBridge.
+// Compiled with:  windres portbridge.rc -O coff -o portbridge_amd64.syso
+//
+// Resource ID 1 = application icon  (shown in Explorer, taskbar, Alt-Tab)
+// Resource ID 1, type 24 = application manifest
+
+1 ICON "icon.ico"
+1 24   "portbridge.manifest"

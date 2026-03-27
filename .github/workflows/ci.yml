@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Install CGO dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libdbus-1-dev
+
+      - name: Run tests (storage/secure with mock keyring)
+        run: |
+          go test -short -tags port_bridge -covermode=atomic \
+            -coverprofile=coverage_storage.out \
+            ./internal/storage/ ./internal/secure/
+
+      - name: Run tests (all other packages)
+        run: |
+          go test -short -covermode=atomic \
+            -coverprofile=coverage_main.out \
+            ./cmd/port-bridge/ \
+            ./internal/models/ \
+            ./internal/version/ \
+            ./internal/updater/ \
+            ./internal/logger/ \
+            ./internal/i18n/ \
+            ./internal/app/ \
+            ./internal/presenter/ \
+            ./internal/ui/ \
+            ./internal/ui/dialogs/ \
+            ./internal/ui/theme/ \
+            ./internal/ui/views/
+
+      - name: Merge coverage profiles
+        run: |
+          echo "mode: atomic" > coverage.out
+          tail -n +2 coverage_storage.out >> coverage.out
+          tail -n +2 coverage_main.out >> coverage.out
+
+      - name: Enforce 95% coverage on core packages
+        run: |
+          go test -short -tags port_bridge -covermode=atomic \
+            -coverprofile=coverage_core.out \
+            ./internal/storage/ ./internal/secure/ \
+            ./internal/models/ ./internal/version/ \
+            ./internal/logger/ ./internal/i18n/
+          total=$(go tool cover -func=coverage_core.out | grep '^total:' | awk '{print $3}' | tr -d '%')
+          echo "Core package coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { if (t+0 < 95) { print "Coverage " t "% is below 95%"; exit 1 } }'
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.out
+          fail_ci_if_error: false
+
+      - name: Verify build
+        run: go build -o /dev/null ./cmd/port-bridge

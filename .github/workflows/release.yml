@@ -1,0 +1,169 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: macos-13       # Intel runner for native amd64 build
+          - arch: arm64
+            runner: macos-latest   # Apple Silicon runner for native arm64 build
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build binary
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          mkdir -p build
+          GOARCH=${{ matrix.arch }} go build \
+            -ldflags "-s -w \
+              -X github.com/young1lin/port-bridge/internal/version.Version=${VERSION} \
+              -X github.com/young1lin/port-bridge/internal/version.GitCommit=$(git rev-parse --short HEAD) \
+              -X github.com/young1lin/port-bridge/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -trimpath -o build/port-bridge ./cmd/port-bridge
+
+      - name: Create .app bundle
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          ICON_SRC="cmd/port-bridge/assets/icon_1024.png"
+          APP_DIR="PortBridge.app"
+
+          # Build directory structure
+          mkdir -p "${APP_DIR}/Contents/MacOS"
+          mkdir -p "${APP_DIR}/Contents/Resources"
+
+          # Copy binary (named PortBridge inside the bundle per convention)
+          cp build/port-bridge "${APP_DIR}/Contents/MacOS/PortBridge"
+          chmod +x "${APP_DIR}/Contents/MacOS/PortBridge"
+
+          # Convert PNG → .icns using macOS built-in tools (no extra deps)
+          ICONSET="${RUNNER_TEMP}/PortBridge.iconset"
+          mkdir -p "${ICONSET}"
+          for size in 16 32 128 256 512; do
+            sips -z ${size} ${size}               "${ICON_SRC}" --out "${ICONSET}/icon_${size}x${size}.png"       >/dev/null
+            sips -z $((size*2)) $((size*2))       "${ICON_SRC}" --out "${ICONSET}/icon_${size}x${size}@2x.png"   >/dev/null
+          done
+          # 512@2x = 1024 (use the source directly)
+          cp "${ICON_SRC}" "${ICONSET}/icon_512x512@2x.png"
+          iconutil -c icns "${ICONSET}" -o "${APP_DIR}/Contents/Resources/PortBridge.icns"
+
+          # Info.plist — minimum required keys for a GUI app
+          cat > "${APP_DIR}/Contents/Info.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>       <string>PortBridge</string>
+            <key>CFBundleIdentifier</key>       <string>com.young1lin.port-bridge</string>
+            <key>CFBundleName</key>             <string>PortBridge</string>
+            <key>CFBundleDisplayName</key>      <string>PortBridge</string>
+            <key>CFBundleIconFile</key>         <string>PortBridge</string>
+            <key>CFBundlePackageType</key>      <string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>CFBundleVersion</key>          <string>${VERSION}</string>
+            <key>LSMinimumSystemVersion</key>   <string>10.15</string>
+            <key>NSHighResolutionCapable</key>  <true/>
+            <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+            <key>LSUIElement</key>              <false/>
+          </dict>
+          </plist>
+          PLIST
+
+          # Zip the .app for distribution
+          # ditto preserves macOS metadata (resource forks, permissions)
+          ditto -c -k --sequesterRsrc --keepParent "${APP_DIR}" \
+            "PortBridge_darwin_${{ matrix.arch }}.app.zip"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-${{ matrix.arch }}
+          path: |
+            build/port-bridge
+            PortBridge_darwin_${{ matrix.arch }}.app.zip
+
+  release:
+    needs: build-mac
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Install cross-compilation toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libdbus-1-dev gcc-mingw-w64-x86-64
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mac-*
+          path: mac-artifacts
+          merge-multiple: false
+
+      - name: Generate Windows icon and resource file
+        run: |
+          go run ./cmd/port-bridge/gen_ico/main.go
+          x86_64-w64-mingw32-windres cmd/port-bridge/portbridge.rc \
+            -O coff -o cmd/port-bridge/portbridge_amd64.syso
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for arch in amd64 arm64; do
+            base="mac-artifacts/mac-${arch}"
+
+            # Raw binary — named port-bridge_darwin-<arch> so platformSuffix()
+            # in updater.go (runtime.GOOS+"-"+runtime.GOARCH) can find it.
+            raw="${base}/port-bridge"
+            if [ -f "${raw}" ]; then
+              cp "${raw}" "port-bridge_darwin-${arch}"
+              gh release upload ${{ github.ref_name }} "port-bridge_darwin-${arch}" \
+                --repo young1lin/port-bridge --clobber
+            fi
+
+            # .app bundle zip — for users who want a native macOS experience
+            app_zip="${base}/PortBridge_darwin_${arch}.app.zip"
+            if [ -f "${app_zip}" ]; then
+              gh release upload ${{ github.ref_name }} "${app_zip}" \
+                --repo young1lin/port-bridge --clobber
+            fi
+          done
+
+      - name: Generate Delta Patches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sudo apt-get install -y bsdiff
+          bash scripts/generate_patches.sh ${{ github.ref_name }}
