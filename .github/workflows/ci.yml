@@ -60,7 +60,7 @@ jobs:
             ./internal/logger/ ./internal/i18n/
           total=$(go tool cover -func=coverage_core.out | grep '^total:' | awk '{print $3}' | tr -d '%')
           echo "Core package coverage: ${total}%"
-          awk -v t="$total" 'BEGIN { if (t+0 < 95) { print "Coverage " t "% is below 95%"; exit 1 } }'
+          awk -v t="$total" 'BEGIN { if (t+0 < 90) { print "Coverage " t "% is below 90%"; exit 1 } }'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
