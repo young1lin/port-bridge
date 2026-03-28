@@ -42,6 +42,26 @@ func newTestStore(t *testing.T) *Store {
 	return s
 }
 
+func stubStorageSeams(t *testing.T) {
+	t.Helper()
+	oldGetEnv := getEnv
+	oldUserHomeDirFn := userHomeDirFn
+	oldMkdirAllFn := mkdirAllFn
+	oldReadFileFn := readFileFn
+	oldWriteFileFn := writeFileFn
+	oldRenameFn := renameFn
+	oldRemoveFn := removeFn
+	t.Cleanup(func() {
+		getEnv = oldGetEnv
+		userHomeDirFn = oldUserHomeDirFn
+		mkdirAllFn = oldMkdirAllFn
+		readFileFn = oldReadFileFn
+		writeFileFn = oldWriteFileFn
+		renameFn = oldRenameFn
+		removeFn = oldRemoveFn
+	})
+}
+
 // TestNewStore_CreatesNew verifies that a new store initializes with empty data.
 func TestNewStore_CreatesNew(t *testing.T) {
 	s, err := NewStoreAt(t.TempDir())
@@ -54,6 +74,37 @@ func TestNewStore_CreatesNew(t *testing.T) {
 	}
 	if tunnels := s.GetTunnels(); len(tunnels) != 0 {
 		t.Fatalf("expected 0 tunnels in new store, got %d", len(tunnels))
+	}
+}
+
+func TestNewStore_UsesPlatformConfigDir(t *testing.T) {
+	stubStorageSeams(t)
+	appData := t.TempDir()
+	getEnv = func(key string) string {
+		if key == "APPDATA" {
+			return appData
+		}
+		return ""
+	}
+
+	s, err := NewStore()
+	if err != nil {
+		t.Fatalf("NewStore returned error: %v", err)
+	}
+
+	want := filepath.Join(appData, "port-bridge", "config.json")
+	if s.filePath != want {
+		t.Fatalf("filePath = %q, want %q", s.filePath, want)
+	}
+}
+
+func TestNewStore_GetConfigDirError(t *testing.T) {
+	stubStorageSeams(t)
+	getEnv = func(string) string { return "" }
+	userHomeDirFn = func() (string, error) { return "", errors.New("home lookup failed") }
+
+	if _, err := NewStore(); err == nil {
+		t.Fatal("expected NewStore to fail when config dir lookup fails")
 	}
 }
 
@@ -718,6 +769,52 @@ func TestGetConfigDir_ReturnsValidPath(t *testing.T) {
 	}
 }
 
+func TestGetConfigDir_UsesAppData(t *testing.T) {
+	stubStorageSeams(t)
+	appData := filepath.Join(t.TempDir(), "AppData")
+	getEnv = func(key string) string {
+		if key == "APPDATA" {
+			return appData
+		}
+		return ""
+	}
+
+	dir, err := getConfigDir()
+	if err != nil {
+		t.Fatalf("getConfigDir: %v", err)
+	}
+	want := filepath.Join(appData, "port-bridge")
+	if dir != want {
+		t.Fatalf("dir = %q, want %q", dir, want)
+	}
+}
+
+func TestGetConfigDir_FallsBackToHome(t *testing.T) {
+	stubStorageSeams(t)
+	home := filepath.Join(t.TempDir(), "home")
+	getEnv = func(string) string { return "" }
+	userHomeDirFn = func() (string, error) { return home, nil }
+
+	dir, err := getConfigDir()
+	if err != nil {
+		t.Fatalf("getConfigDir: %v", err)
+	}
+	want := filepath.Join(home, ".port-bridge")
+	if dir != want {
+		t.Fatalf("dir = %q, want %q", dir, want)
+	}
+}
+
+func TestGetConfigDir_HomeError(t *testing.T) {
+	stubStorageSeams(t)
+	getEnv = func(string) string { return "" }
+	userHomeDirFn = func() (string, error) { return "", errors.New("home failed") }
+
+	if _, err := getConfigDir(); err == nil {
+		t.Fatal("expected getConfigDir to propagate home lookup failure")
+	}
+}
+
 // TestLoadPasswordsFromKeyring_ProxyPassword tests loading proxy password from keyring.
 func TestLoadPasswordsFromKeyring_ProxyPassword(t *testing.T) {
 	s := newTestStore(t)
@@ -985,6 +1082,44 @@ func TestSavePasswordsToKeyring_IgnoresSetErrors(t *testing.T) {
 	}
 }
 
+func TestSavePasswordsToKeyring_ClearsStaleRefs(t *testing.T) {
+	s := newTestStore(t)
+	keyring := secure.NewMockKeyring()
+	s.keyring = keyring
+
+	if err := keyring.Set(secure.ServiceName, "pw-ref", "pw"); err != nil {
+		t.Fatalf("Set password secret: %v", err)
+	}
+	if err := keyring.Set(secure.ServiceName, "key-ref", "kp"); err != nil {
+		t.Fatalf("Set key secret: %v", err)
+	}
+	if err := keyring.Set(secure.ServiceName, "proxy-ref", "pp"); err != nil {
+		t.Fatalf("Set proxy secret: %v", err)
+	}
+
+	conn := &models.SSHConnection{
+		ID:           "conn-clear",
+		PasswordRef:  "pw-ref",
+		KeyPassRef:   "key-ref",
+		ProxyPassRef: "proxy-ref",
+	}
+
+	s.savePasswordsToKeyring(conn)
+
+	if conn.PasswordRef != "" || conn.KeyPassRef != "" || conn.ProxyPassRef != "" {
+		t.Fatal("expected stale refs to be cleared when secrets are empty")
+	}
+	if _, err := keyring.Get(secure.ServiceName, "pw-ref"); err == nil {
+		t.Fatal("password secret should be deleted")
+	}
+	if _, err := keyring.Get(secure.ServiceName, "key-ref"); err == nil {
+		t.Fatal("key secret should be deleted")
+	}
+	if _, err := keyring.Get(secure.ServiceName, "proxy-ref"); err == nil {
+		t.Fatal("proxy secret should be deleted")
+	}
+}
+
 func TestStoreSave_EnsureDirFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	blocker := filepath.Join(tmpDir, "blocked")
@@ -1015,5 +1150,42 @@ func TestStoreSave_WriteFileError(t *testing.T) {
 
 	if err := s.save(); err == nil {
 		t.Fatal("expected save to fail when filePath points to a directory")
+	}
+}
+
+func TestStoreSave_RenameFailureRemovesTempFile(t *testing.T) {
+	stubStorageSeams(t)
+	tmpDir := t.TempDir()
+	tmpPath := filepath.Join(tmpDir, "config.json.tmp")
+	removed := ""
+
+	writeFileFn = func(name string, data []byte, perm os.FileMode) error {
+		if name != tmpPath {
+			t.Fatalf("write temp path = %q, want %q", name, tmpPath)
+		}
+		return nil
+	}
+	renameFn = func(oldPath, newPath string) error {
+		return errors.New("rename failed")
+	}
+	removeFn = func(name string) error {
+		removed = name
+		return nil
+	}
+
+	s := &Store{
+		filePath: filepath.Join(tmpDir, "config.json"),
+		data: &Config{
+			Connections: []*models.SSHConnection{},
+			Tunnels:     []*models.Tunnel{},
+		},
+		keyring: secure.NewMockKeyring(),
+	}
+
+	if err := s.save(); err == nil {
+		t.Fatal("expected save to fail when rename fails")
+	}
+	if removed != tmpPath {
+		t.Fatalf("temp cleanup path = %q, want %q", removed, tmpPath)
 	}
 }

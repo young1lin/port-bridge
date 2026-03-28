@@ -61,12 +61,17 @@ xattr -cr /path/to/PortBridge.app
 ```bash
 make deps
 make run
-make test
+make test-unit
+make test-gui
+make test-all
 make test-coverage
 ```
 
 - `make build`: 生成发布版 `build/port-bridge.exe`
 - `make build-debug`: 生成带控制台的调试版本
+- `make test-unit`: 纯单元测试，不依赖 Fyne / CGO / GUI 运行时
+- `make test-gui`: GUI 测试，依赖 Fyne 和 CGO 工具链
+- `make test-all`: 单元测试 + GUI 测试 + SSH 集成测试
 - `make test-coverage`: 核心包覆盖率门槛为 95%+
 
 项目使用 Go `1.26`，module path 为 `github.com/young1lin/port-bridge`。

@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SSH Port Forwarding GUI Tool - A lightweight Windows desktop application for managing SSH tunnel port forwarding, similar to XTerminal's port forwarding feature.
+SSH Port Forwarding GUI Tool - A lightweight cross-platform desktop application for managing SSH tunnel port forwarding, similar to XTerminal's port forwarding feature.
 
-**Tech Stack:** Go 1.21, Fyne v2 (GUI), golang.org/x/crypto/ssh
+**Tech Stack:** Go 1.26, Fyne v2 (GUI), golang.org/x/crypto/ssh
 
 **Requirements:** CGO enabled (requires GCC - use MSYS2 MinGW-w64 on Windows)
 
@@ -39,18 +39,18 @@ make clean       # Clean build artifacts
 **Auto-format before build**: `make build` and `make build-debug` run `go fmt ./...` automatically before compiling.
 
 **Release build** (`make build`):
-- Output: `build/forward-port.exe`
+- Output: `build/port-bridge.exe`
 - Uses `-ldflags "-s -w -H=windowsgui"` to strip debug info and hide the console window
 - Uses `-trimpath` to remove local file system paths from the binary
 
 **Debug build** (`make build-debug`):
-- Output: `build/forward-port-debug.exe`
+- Output: `build/port-bridge-debug.exe`
 - Retains debug info and shows the console window for log output
 
 ## Architecture
 
 ```
-cmd/forward-port/
+	cmd/port-bridge/
 ├── main.go              # Entry point, UI setup, callbacks
 ├── console_windows.go   # Windows console control (hide/show)
 └── console_unix.go      # Unix stub for console control
@@ -96,14 +96,14 @@ internal/
 
 **Data Flow:**
 1. User action → View callback → main.go handler
-2. Handler calls App.GetTunnelManager().StartTunnel(id)
-3. TunnelManager creates SSH client, starts local listener
-4. Status changes notified via callbacks → UI refresh
+2. Presenter calls `internal/app` services
+3. `TunnelManager` creates or reuses SSH client, starts local listener
+4. Status changes flow back through callbacks → UI refresh
 
 ## Configuration
 
-- Config file: `%APPDATA%\forward-port\config.json`
-- Log file: `%APPDATA%\forward-port\logs\forward-port.log` (max 1MB, auto-rotating)
+- Config file: `%APPDATA%\port-bridge\config.json`
+- Log file: `%APPDATA%\port-bridge\logs\forward-port.log` (max 1MB, auto-rotating)
 
 ## Key Patterns
 

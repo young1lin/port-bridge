@@ -12,6 +12,16 @@ import (
 	"github.com/young1lin/port-bridge/internal/secure"
 )
 
+var (
+	getEnv        = os.Getenv
+	userHomeDirFn = os.UserHomeDir
+	mkdirAllFn    = os.MkdirAll
+	readFileFn    = os.ReadFile
+	writeFileFn   = os.WriteFile
+	renameFn      = os.Rename
+	removeFn      = os.Remove
+)
+
 // Store manages configuration persistence
 type Store struct {
 	mu       sync.RWMutex
@@ -74,10 +84,10 @@ func NewStoreAt(dir string) (*Store, error) {
 // getConfigDir returns the application config directory
 func getConfigDir() (string, error) {
 	// Use AppData/Roaming on Windows
-	appData := os.Getenv("APPDATA")
+	appData := getEnv("APPDATA")
 	if appData == "" {
 		// Fallback to home directory
-		home, err := os.UserHomeDir()
+		home, err := userHomeDirFn()
 		if err != nil {
 			return "", err
 		}
@@ -92,13 +102,13 @@ func getConfigDir() (string, error) {
 func (s *Store) ensureDir() error {
 	dir := filepath.Dir(s.filePath)
 	log.Printf("[DEBUG] Ensuring config directory exists: %s", dir)
-	return os.MkdirAll(dir, 0755)
+	return mkdirAllFn(dir, 0755)
 }
 
 // load reads the configuration from disk
 func (s *Store) load() error {
 	log.Printf("[DEBUG] Loading config from: %s", s.filePath)
-	data, err := os.ReadFile(s.filePath)
+	data, err := readFileFn(s.filePath)
 	if err != nil {
 		return err
 	}
@@ -204,17 +214,17 @@ func (s *Store) save() error {
 
 	// Write to temporary file first (atomic write pattern)
 	tmpPath := s.filePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+	if err := writeFileFn(tmpPath, data, 0600); err != nil {
 		log.Printf("[ERROR] Failed to write temp config file: %v", err)
 		return err
 	}
 
 	// Atomic rename - on Windows this replaces the target file
 	log.Printf("[DEBUG] Saving config to: %s", s.filePath)
-	if err := os.Rename(tmpPath, s.filePath); err != nil {
+	if err := renameFn(tmpPath, s.filePath); err != nil {
 		log.Printf("[ERROR] Failed to rename config file: %v", err)
 		// Try to clean up temp file
-		os.Remove(tmpPath)
+		_ = removeFn(tmpPath)
 		return err
 	}
 

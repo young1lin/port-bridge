@@ -70,6 +70,12 @@ const (
 var (
 	cacheMu     sync.RWMutex
 	memoryCache *cachedReleaseInfo
+	getEnv      = os.Getenv
+	userHomeDir = os.UserHomeDir
+	readFile    = os.ReadFile
+	mkdirAll    = os.MkdirAll
+	writeFile   = os.WriteFile
+	renameFile  = os.Rename
 )
 
 type tempUpdateFile interface {
@@ -493,9 +499,9 @@ func getCacheFilePath() (string, error) {
 
 // getConfigDir returns the application config directory
 func getConfigDir() (string, error) {
-	appData := os.Getenv("APPDATA")
+	appData := getEnv("APPDATA")
 	if appData == "" {
-		home, err := os.UserHomeDir()
+		home, err := userHomeDir()
 		if err != nil {
 			return "", err
 		}
@@ -511,7 +517,7 @@ func (u *Updater) loadCacheFromDisk() (*cachedReleaseInfo, error) {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(cachePath)
+	data, err := readFile(cachePath)
 	if err != nil {
 		return nil, err
 	}
@@ -533,7 +539,7 @@ func (u *Updater) saveCacheToDisk(cached *cachedReleaseInfo) error {
 
 	// Ensure directory exists
 	dir := filepath.Dir(cachePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := mkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
@@ -544,9 +550,9 @@ func (u *Updater) saveCacheToDisk(cached *cachedReleaseInfo) error {
 
 	// Use atomic write pattern
 	tmpPath := cachePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+	if err := writeFile(tmpPath, data, 0600); err != nil {
 		return err
 	}
 
-	return os.Rename(tmpPath, cachePath)
+	return renameFile(tmpPath, cachePath)
 }

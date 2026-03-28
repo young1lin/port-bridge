@@ -1584,6 +1584,24 @@ func newCacheUpdater(t *testing.T) (*Updater, string) {
 	return u, dir
 }
 
+func stubUpdaterSeams(t *testing.T) {
+	t.Helper()
+	oldGetEnv := getEnv
+	oldUserHomeDir := userHomeDir
+	oldReadFile := readFile
+	oldMkdirAll := mkdirAll
+	oldWriteFile := writeFile
+	oldRenameFile := renameFile
+	t.Cleanup(func() {
+		getEnv = oldGetEnv
+		userHomeDir = oldUserHomeDir
+		readFile = oldReadFile
+		mkdirAll = oldMkdirAll
+		writeFile = oldWriteFile
+		renameFile = oldRenameFile
+	})
+}
+
 func TestGetConfigDir_ReturnsValidPath(t *testing.T) {
 	dir, err := getConfigDir()
 	if err != nil {
@@ -1591,6 +1609,52 @@ func TestGetConfigDir_ReturnsValidPath(t *testing.T) {
 	}
 	if dir == "" {
 		t.Fatal("getConfigDir returned empty path")
+	}
+}
+
+func TestGetConfigDir_UsesAppData(t *testing.T) {
+	stubUpdaterSeams(t)
+	appData := filepath.Join(t.TempDir(), "AppData")
+	getEnv = func(key string) string {
+		if key == "APPDATA" {
+			return appData
+		}
+		return ""
+	}
+
+	dir, err := getConfigDir()
+	if err != nil {
+		t.Fatalf("getConfigDir: %v", err)
+	}
+	want := filepath.Join(appData, "port-bridge")
+	if dir != want {
+		t.Fatalf("dir = %q, want %q", dir, want)
+	}
+}
+
+func TestGetConfigDir_FallsBackToHome(t *testing.T) {
+	stubUpdaterSeams(t)
+	home := filepath.Join(t.TempDir(), "home")
+	getEnv = func(string) string { return "" }
+	userHomeDir = func() (string, error) { return home, nil }
+
+	dir, err := getConfigDir()
+	if err != nil {
+		t.Fatalf("getConfigDir: %v", err)
+	}
+	want := filepath.Join(home, ".port-bridge")
+	if dir != want {
+		t.Fatalf("dir = %q, want %q", dir, want)
+	}
+}
+
+func TestGetConfigDir_HomeError(t *testing.T) {
+	stubUpdaterSeams(t)
+	getEnv = func(string) string { return "" }
+	userHomeDir = func() (string, error) { return "", fmt.Errorf("home failed") }
+
+	if _, err := getConfigDir(); err == nil {
+		t.Fatal("expected getConfigDir to fail when home lookup fails")
 	}
 }
 

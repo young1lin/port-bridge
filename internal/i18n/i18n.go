@@ -13,7 +13,8 @@ import (
 
 var (
 	mu          sync.Mutex
-	changes     []func()
+	changes     map[int]func()
+	nextCBID    int
 	bundle      *i18n.Bundle
 	localizer   *i18n.Localizer
 	currentLang string
@@ -24,20 +25,31 @@ func init() {
 	bundle.RegisterUnmarshalFunc("json", json.Unmarshal)
 	currentLang = "en"
 	localizer = i18n.NewLocalizer(bundle, currentLang)
+	changes = make(map[int]func())
 }
 
 // OnLanguageChange registers a callback that is invoked when the language changes.
-func OnLanguageChange(cb func()) {
+// It returns an unregister function that removes the callback when called.
+func OnLanguageChange(cb func()) (unregister func()) {
 	mu.Lock()
 	defer mu.Unlock()
-	changes = append(changes, cb)
+	id := nextCBID
+	nextCBID++
+	changes[id] = cb
+	return func() {
+		mu.Lock()
+		defer mu.Unlock()
+		delete(changes, id)
+	}
 }
 
 // NotifyLanguageChange fires all registered language change callbacks.
 func NotifyLanguageChange() {
 	mu.Lock()
-	callbacks := make([]func(), len(changes))
-	copy(callbacks, changes)
+	callbacks := make([]func(), 0, len(changes))
+	for _, cb := range changes {
+		callbacks = append(callbacks, cb)
+	}
 	mu.Unlock()
 
 	for _, cb := range callbacks {

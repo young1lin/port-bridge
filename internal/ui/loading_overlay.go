@@ -2,9 +2,9 @@ package ui
 
 import (
 	"context"
+	"embed"
 	"fmt"
 	"log"
-	"math"
 	"sync"
 	"time"
 
@@ -14,6 +14,26 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
+
+//go:embed spinner/spinner_frame_*.svg
+var spinnerFS embed.FS
+
+// spinnerFrames holds pre-loaded SVG resources for all 30 animation frames (0..348 degrees, step 12).
+// Initialized once at startup; animate() only indexes into this array — no runtime allocations.
+var spinnerFrames [30]*fyne.StaticResource
+
+func init() {
+	for i := 0; i < 30; i++ {
+		deg := i * 12
+		name := fmt.Sprintf("spinner/spinner_frame_%03d.svg", deg)
+		data, err := spinnerFS.ReadFile(name)
+		if err != nil {
+			log.Printf("[ERROR] Failed to load spinner frame %s: %v", name, err)
+			continue
+		}
+		spinnerFrames[i] = fyne.NewStaticResource(fmt.Sprintf("dots_%d", deg), data)
+	}
+}
 
 // Result is the outcome returned by a LoadingOverlay's task.
 type Result int
@@ -150,7 +170,11 @@ type dotSpinner struct {
 func newDotSpinner() *dotSpinner {
 	s := &dotSpinner{stop: make(chan struct{})}
 	s.ExtendBaseWidget(s)
-	s.img = canvas.NewImageFromResource(s.makeSVG(0))
+	initialFrame := spinnerFrames[0]
+	if initialFrame == nil {
+		initialFrame = fyne.NewStaticResource("dots_0_fallback", []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"/>`))
+	}
+	s.img = canvas.NewImageFromResource(initialFrame)
 	s.img.FillMode = canvas.ImageFillContain
 	go s.animate()
 	return s
@@ -173,33 +197,15 @@ func (s *dotSpinner) animate() {
 			return
 		case <-ticker.C:
 			s.deg = (s.deg + 12) % 360
-			fyne.Do(func() {
-				s.img.Resource = s.makeSVG(s.deg)
-				s.img.Refresh()
-			})
+			idx := s.deg / 12
+			if idx >= 0 && idx < 30 && spinnerFrames[idx] != nil {
+				fyne.Do(func() {
+					s.img.Resource = spinnerFrames[idx]
+					s.img.Refresh()
+				})
+			}
 		}
 	}
-}
-
-func (s *dotSpinner) makeSVG(deg int) *fyne.StaticResource {
-	const cx, cy = 20.0, 20.0
-	const r = 12.0
-	const dotR = 2.5
-
-	opacities := [8]float64{1.0, 0.85, 0.65, 0.45, 0.3, 0.2, 0.12, 0.08}
-
-	svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">`)
-	for i, opacity := range opacities {
-		angle := float64(i)*360.0/8.0 + float64(deg)
-		rad := angle * math.Pi / 180.0
-		x := cx + r*math.Sin(rad)
-		y := cy - r*math.Cos(rad)
-		svg += fmt.Sprintf(`<circle cx="%.2f" cy="%.2f" r="%.2f" fill="#4CAF50" opacity="%.2f"/>`, x, y, dotR, opacity)
-		_ = i
-	}
-	svg += `</svg>`
-
-	return fyne.NewStaticResource(fmt.Sprintf("dots_%d", deg), []byte(svg))
 }
 
 func (s *dotSpinner) CreateRenderer() fyne.WidgetRenderer {

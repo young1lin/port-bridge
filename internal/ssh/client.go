@@ -320,18 +320,25 @@ func (c *Client) WaitForDisconnect() {
 	}
 }
 
-// WaitForDisconnectContext blocks until the SSH connection is closed or context is cancelled
+// WaitForDisconnectContext blocks until the SSH connection is closed or context is cancelled.
+// When the context is cancelled, the function returns immediately without closing the SSH
+// connection — other tunnels sharing the same client may still be using it.
+// The internal goroutine running client.Wait() is tracked by c.wg and will be waited on
+// by Disconnect(), so it never leaks beyond the client's lifetime.
 func (c *Client) WaitForDisconnectContext(ctx context.Context) {
 	c.mu.Lock()
 	client := c.client
 	c.mu.Unlock()
 
 	if client == nil {
+		log.Printf("[DEBUG] WaitForDisconnectContext: client is nil, returning")
 		return
 	}
 
 	done := make(chan struct{})
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		client.Wait()
 		close(done)
 	}()
@@ -340,7 +347,10 @@ func (c *Client) WaitForDisconnectContext(ctx context.Context) {
 	case <-done:
 		log.Printf("[DEBUG] SSH connection closed for client")
 	case <-ctx.Done():
-		log.Printf("[DEBUG] WaitForDisconnectContext cancelled for client")
+		log.Printf("[DEBUG] WaitForDisconnectContext cancelled, returning without force-close (shared client may still be in use)")
+		// Do NOT close the SSH connection here — other tunnels sharing this client
+		// are still using it. The goroutine running client.Wait() is tracked by c.wg
+		// and will be cleaned up when Disconnect() calls c.wg.Wait().
 	}
 }
 

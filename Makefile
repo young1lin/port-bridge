@@ -5,8 +5,12 @@ APP_NAME = port-bridge
 BUILD_DIR = build
 MAIN_PATH = ./cmd/port-bridge
 COVERAGE_PROFILE = coverage_core.cov
+CORE_PACKAGES = ./internal/storage/ ./internal/secure/ ./internal/models/ ./internal/version/ ./internal/logger/ ./internal/i18n/
+UNIT_PACKAGES = ./internal/models/ ./internal/version/ ./internal/updater/ ./internal/logger/ ./internal/i18n/ ./internal/app/
+GUI_PACKAGES = ./cmd/port-bridge/ ./internal/presenter/ ./internal/ui/ ./internal/ui/dialogs/ ./internal/ui/theme/ ./internal/ui/views/
 COVERAGE_PACKAGES = ./internal/storage/ ./internal/secure/ ./internal/models/ ./internal/version/ ./internal/logger/ ./internal/i18n/
 TEST_TMP_DIR_WIN = C:\Temp\port-bridge-go
+MINGW_PATH_WIN = C:\msys64\mingw64\bin
 
 # MinGW-w64 GCC path (installed via MSYS2)
 MINGW_PATH = /c/msys64/mingw64/bin
@@ -42,7 +46,7 @@ LDFLAGS_COMMON = -s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Bu
 # -H=windowsgui hides the console window; only valid for Windows targets
 LDFLAGS = $(LDFLAGS_COMMON) -H=windowsgui
 
-.PHONY: all build run clean test test-unit test-integration test-all test-coverage deps fmt build-debug compress run-debug icon
+.PHONY: all build run clean test test-unit test-gui test-integration test-all test-coverage deps fmt build-debug compress run-debug icon
 .PHONY: build-windows build-darwin-amd64 build-darwin-arm64 build-linux build-all
 
 # Default target
@@ -74,28 +78,29 @@ build-debug: fmt
 	@echo "Build complete: $(BUILD_DIR)/$(APP_NAME)-debug.exe"
 
 # Run unit tests (-tags port_bridge activates MockKeyring for storage).
-# SSH package tests are intentionally excluded here because executing
-# `internal/ssh` always runs `ssh.test.exe`, which this repo treats as
-# integration-test scope.
+# Keep this target pure Go and OS-independent: no Fyne/CGO packages here.
 test: test-unit
 
 test-unit:
 	@powershell -NoProfile -Command "$$env:TEMP='$(TEST_TMP_DIR_WIN)'; $$env:TMP='$(TEST_TMP_DIR_WIN)'; New-Item -ItemType Directory -Force '$(TEST_TMP_DIR_WIN)' | Out-Null; go test -short -v -tags port_bridge ./internal/storage/ ./internal/secure/"
-	@powershell -NoProfile -Command "$$env:TEMP='$(TEST_TMP_DIR_WIN)'; $$env:TMP='$(TEST_TMP_DIR_WIN)'; New-Item -ItemType Directory -Force '$(TEST_TMP_DIR_WIN)' | Out-Null; go test -short -v ./cmd/port-bridge/ ./internal/models/ ./internal/version/ ./internal/updater/ ./internal/logger/ ./internal/i18n/ ./internal/app/ ./internal/presenter/ ./internal/ui/ ./internal/ui/dialogs/ ./internal/ui/theme/ ./internal/ui/views/"
+	@powershell -NoProfile -Command "$$env:TEMP='$(TEST_TMP_DIR_WIN)'; $$env:TMP='$(TEST_TMP_DIR_WIN)'; New-Item -ItemType Directory -Force '$(TEST_TMP_DIR_WIN)' | Out-Null; go test -short -v $(UNIT_PACKAGES)"
+
+# GUI tests depend on Fyne and therefore on CGO / a working compiler toolchain.
+test-gui:
+	@powershell -NoProfile -Command "$$env:PATH='$(MINGW_PATH_WIN);' + $$env:PATH; $$env:TEMP='$(TEST_TMP_DIR_WIN)'; $$env:TMP='$(TEST_TMP_DIR_WIN)'; New-Item -ItemType Directory -Force '$(TEST_TMP_DIR_WIN)' | Out-Null; go test -short -v $(GUI_PACKAGES)"
 
 # Run integration tests explicitly.
 test-integration:
 	@powershell -NoProfile -Command "$$env:TEMP='$(TEST_TMP_DIR_WIN)'; $$env:TMP='$(TEST_TMP_DIR_WIN)'; New-Item -ItemType Directory -Force '$(TEST_TMP_DIR_WIN)' | Out-Null; go test -short -v -tags integration ./internal/ssh/"
 
-test-all: test-unit test-integration
+test-all: test-unit test-gui test-integration
 
-# Run unit tests, then enforce 95%+ coverage for deterministic core packages.
-# GUI, SSH integration, and self-update process replacement are still exercised by separate targets,
-# but excluded from the coverage gate because they depend on external processes, UI runtimes, or network behavior.
+# Run pure unit tests, then enforce 95%+ coverage for deterministic core packages.
+# GUI, SSH integration, and self-update process replacement are exercised separately.
 test-coverage: test-unit
 	@powershell -NoProfile -Command "$$env:TEMP='$(TEST_TMP_DIR_WIN)'; $$env:TMP='$(TEST_TMP_DIR_WIN)'; New-Item -ItemType Directory -Force '$(TEST_TMP_DIR_WIN)' | Out-Null; go test -short -v -tags port_bridge -covermode=atomic -coverprofile='$(COVERAGE_PROFILE)' $(COVERAGE_PACKAGES)"
 	@go tool cover -func='$(COVERAGE_PROFILE)'
-	@powershell -NoProfile -Command "$$line = go tool cover -func='$(COVERAGE_PROFILE)' | Select-String '^total:'; $$last = $$line.ToString().Split()[-1]; $$total = [double]$$last.Substring(0, $$last.Length - 1); if ($$total -lt 90) { Write-Host ('Coverage ' + $$total + ' is below 90'); exit 1 }"
+	@powershell -NoProfile -Command "$$line = go tool cover -func='$(COVERAGE_PROFILE)' | Select-String '^total:'; $$last = $$line.ToString().Split()[-1]; $$total = [double]$$last.Substring(0, $$last.Length - 1); if ($$total -lt 95) { Write-Host ('Coverage ' + $$total + ' is below 95'); exit 1 }"
 
 # Clean
 clean:

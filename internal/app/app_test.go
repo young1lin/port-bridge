@@ -40,6 +40,11 @@ func newTestClientManager() *ClientManager {
 	}
 }
 
+func isolateAppData(t *testing.T) {
+	t.Helper()
+	t.Setenv("APPDATA", t.TempDir())
+}
+
 func TestClientManager_ReleaseClient_NotFound(t *testing.T) {
 	cm := newTestClientManager()
 	cm.ReleaseClient("nonexistent-id")
@@ -626,6 +631,7 @@ func TestClientManager_DisconnectAll_DisconnectsEveryClient(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNewApp(t *testing.T) {
+	isolateAppData(t)
 	app, err := NewApp()
 	if err != nil {
 		t.Fatalf("NewApp: %v", err)
@@ -695,6 +701,7 @@ func TestNewApp_UsesInjectedTunnelManager(t *testing.T) {
 }
 
 func TestApp_GetStore(t *testing.T) {
+	isolateAppData(t)
 	app, err := NewApp()
 	if err != nil {
 		t.Fatalf("NewApp: %v", err)
@@ -713,6 +720,7 @@ func TestApp_GetStore(t *testing.T) {
 }
 
 func TestApp_GetTunnelManager(t *testing.T) {
+	isolateAppData(t)
 	app, err := NewApp()
 	if err != nil {
 		t.Fatalf("NewApp: %v", err)
@@ -726,6 +734,7 @@ func TestApp_GetTunnelManager(t *testing.T) {
 }
 
 func TestApp_GetClientManager(t *testing.T) {
+	isolateAppData(t)
 	app, err := NewApp()
 	if err != nil {
 		t.Fatalf("NewApp: %v", err)
@@ -739,6 +748,7 @@ func TestApp_GetClientManager(t *testing.T) {
 }
 
 func TestApp_Shutdown(t *testing.T) {
+	isolateAppData(t)
 	app, err := NewApp()
 	if err != nil {
 		t.Fatalf("NewApp: %v", err)

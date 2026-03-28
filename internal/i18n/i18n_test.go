@@ -26,7 +26,7 @@ func resetBundleState(t *testing.T) {
 	bundle.RegisterUnmarshalFunc("json", json.Unmarshal)
 	currentLang = "en"
 	localizer = goi18n.NewLocalizer(bundle, currentLang)
-	changes = nil
+	changes = make(map[int]func())
 	mu.Unlock()
 
 	t.Cleanup(func() {
@@ -104,7 +104,7 @@ func TestOnLanguageChange(t *testing.T) {
 	// Save and restore original callbacks
 	mu.Lock()
 	orig := changes
-	changes = nil
+	changes = make(map[int]func())
 	mu.Unlock()
 	defer func() {
 		mu.Lock()
@@ -125,7 +125,7 @@ func TestOnLanguageChange(t *testing.T) {
 func TestOnLanguageChange_Multiple(t *testing.T) {
 	mu.Lock()
 	orig := changes
-	changes = nil
+	changes = make(map[int]func())
 	mu.Unlock()
 	defer func() {
 		mu.Lock()
@@ -190,7 +190,7 @@ func TestSetLanguage_UpperCase(t *testing.T) {
 func TestNotifyLanguageChange_WithSet(t *testing.T) {
 	mu.Lock()
 	orig := changes
-	changes = nil
+	changes = make(map[int]func())
 	mu.Unlock()
 	defer func() {
 		mu.Lock()
@@ -270,5 +270,29 @@ func TestStatusText_Fallback(t *testing.T) {
 	result := StatusText("Disconnected")
 	if result != "Disconnected" {
 		t.Errorf("StatusText(Disconnected) = %q, want %q", result, "Disconnected")
+	}
+}
+
+func TestOnLanguageChange_Unregister(t *testing.T) {
+	mu.Lock()
+	orig := changes
+	changes = make(map[int]func())
+	mu.Unlock()
+	defer func() {
+		mu.Lock()
+		changes = orig
+		mu.Unlock()
+	}()
+
+	var called bool
+	unregister := OnLanguageChange(func() { called = true })
+
+	// Unregister before notifying
+	unregister()
+
+	NotifyLanguageChange()
+
+	if called {
+		t.Error("callback should NOT have been called after unregister")
 	}
 }

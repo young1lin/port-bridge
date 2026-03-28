@@ -69,7 +69,7 @@ func main() {
 
 func runApp() error {
 	// Initialize rotating logger
-	logDir := filepath.Join(os.Getenv("APPDATA"), "portbridge", "logs")
+	logDir := filepath.Join(os.Getenv("APPDATA"), "port-bridge", "logs")
 	if err := initLogger(logDir); err != nil {
 		log.Printf("[WARN] Failed to initialize log file: %v", err)
 	}

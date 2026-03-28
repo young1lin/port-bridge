@@ -366,12 +366,17 @@ func (m *TunnelManager) acceptConnectionsOrWaitDisconnect(at *activeTunnel) tunn
 	go func() {
 		defer at.wg.Done()
 		if m.isClientConnected(at.client) {
+			log.Printf("[DEBUG] SSH monitor started: tunnel=%s, watching for disconnect", at.tunnel.ID)
 			m.waitForDisconnect(at.client, ctx)
 			select {
 			case <-ctx.Done():
+				log.Printf("[DEBUG] SSH monitor exiting: tunnel=%s, context cancelled (user stop)", at.tunnel.ID)
 				return
 			case sshDisconnected <- struct{}{}:
+				log.Printf("[DEBUG] SSH monitor exiting: tunnel=%s, SSH disconnected", at.tunnel.ID)
 			}
+		} else {
+			log.Printf("[DEBUG] SSH monitor: tunnel=%s, client not connected, skipping", at.tunnel.ID)
 		}
 	}()
 
@@ -583,7 +588,7 @@ func (m *TunnelManager) StopTunnel(tunnelID string) error {
 		return nil // Not running
 	}
 
-	log.Printf("[DEBUG] Stopping tunnel: id=%s", tunnelID)
+	log.Printf("[DEBUG] Stopping tunnel: id=%s, status=%s", tunnelID, at.status.String())
 
 	// Cancel context to stop everything
 	at.cancel()
@@ -597,6 +602,7 @@ func (m *TunnelManager) StopTunnel(tunnelID string) error {
 	// Wait for goroutines to finish
 	log.Printf("[DEBUG] Waiting for tunnel goroutines to finish: id=%s", tunnelID)
 	at.wg.Wait()
+	log.Printf("[DEBUG] Tunnel goroutines finished: id=%s", tunnelID)
 
 	delete(m.tunnels, tunnelID)
 	m.mu.Unlock() // Release lock BEFORE notifying to avoid deadlock
@@ -647,10 +653,13 @@ func (m *TunnelManager) StopAll() {
 	}
 	m.mu.Unlock()
 
-	log.Printf("[DEBUG] Stopping %d tunnels", len(tunnelIDs))
-	for _, id := range tunnelIDs {
+	log.Printf("[DEBUG] Stopping %d tunnels: %v", len(tunnelIDs), tunnelIDs)
+	for i, id := range tunnelIDs {
+		log.Printf("[DEBUG] StopAll: stopping tunnel %d/%d: id=%s", i+1, len(tunnelIDs), id)
 		m.StopTunnel(id)
+		log.Printf("[DEBUG] StopAll: completed tunnel %d/%d: id=%s", i+1, len(tunnelIDs), id)
 	}
+	log.Printf("[DEBUG] StopAll: all %d tunnels stopped", len(tunnelIDs))
 }
 
 // GetRunningCount returns the number of currently running tunnels

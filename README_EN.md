@@ -61,12 +61,17 @@ Or right-click the app in Finder → Open → Open anyway.
 ```bash
 make deps
 make run
-make test
+make test-unit
+make test-gui
+make test-all
 make test-coverage
 ```
 
 - `make build` builds `build/port-bridge.exe`
 - `make build-debug` keeps the console window for debugging
+- `make test-unit` runs pure unit tests without Fyne / CGO / GUI runtime dependencies
+- `make test-gui` runs GUI-focused tests that require Fyne and a CGO toolchain
+- `make test-all` runs unit, GUI, and SSH integration tests
 - `make test-coverage` enforces a 95%+ gate on core packages
 
 The repository uses Go `1.26` and the module path `github.com/young1lin/port-bridge`.

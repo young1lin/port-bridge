@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
@@ -124,6 +125,17 @@ func GetHostKeyCallback() (ssh.HostKeyCallback, error) {
 			fileWriteMu.Lock()
 			defer fileWriteMu.Unlock()
 
+			line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key)
+
+			// Avoid duplicates: check if this exact line already exists
+			if existing, readErr := os.ReadFile(knownHostsPath); readErr == nil {
+				for _, l := range strings.Split(string(existing), "\n") {
+					if l == line {
+						return nil
+					}
+				}
+			}
+
 			f, ferr := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
 			if ferr != nil {
 				log.Printf("[ERROR] Failed to open known_hosts for writing: %v", ferr)
@@ -132,7 +144,6 @@ func GetHostKeyCallback() (ssh.HostKeyCallback, error) {
 			}
 			defer f.Close()
 
-			line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key)
 			if _, ferr := f.WriteString(line + "\n"); ferr != nil {
 				log.Printf("[ERROR] Failed to write host key: %v", ferr)
 			}

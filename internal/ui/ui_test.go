@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -197,18 +198,27 @@ func TestRunWithLoading_PanicRecovered(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
-func TestDotSpinnerMakeSVG(t *testing.T) {
+func TestSpinnerFramesPreLoaded(t *testing.T) {
+	// Verify all 30 spinner frames were loaded at init time
+	loaded := 0
+	for i, frame := range spinnerFrames {
+		if frame != nil {
+			loaded++
+			expectedName := fmt.Sprintf("dots_%d", i*12)
+			if frame.Name() != expectedName {
+				t.Errorf("spinnerFrames[%d]: expected name %q, got %q", i, expectedName, frame.Name())
+			}
+		}
+	}
+	if loaded != 30 {
+		t.Errorf("expected 30 spinner frames, got %d", loaded)
+	}
+}
+
+func TestDotSpinnerAnimate(t *testing.T) {
 	spinner := newDotSpinner()
 	t.Cleanup(spinner.Stop)
-
-	res := spinner.makeSVG(24)
-	if res == nil {
-		t.Fatal("makeSVG should return a resource")
-	}
-	if res.Name() != "dots_24" {
-		t.Fatalf("unexpected resource name: %s", res.Name())
-	}
-
+	time.Sleep(150 * time.Millisecond) // let a few frames animate
 	(&dotSpinnerRenderer{img: spinner.img}).Destroy()
 }
 
